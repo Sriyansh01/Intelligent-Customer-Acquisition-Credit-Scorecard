@@ -1,5 +1,5 @@
 # Ignore all raw datasets
-data/raw/
+data/raw/*.csv
 
 # Ignore all CSV files
 *.csv
