@@ -1,0 +1,12 @@
+# Ignore all raw datasets
+data/raw/
+
+# Ignore all CSV files
+*.csv
+
+# Ignore model files
+*.pkl
+
+# Ignore cache
+__pycache__/
+.ipynb_checkpoints/
