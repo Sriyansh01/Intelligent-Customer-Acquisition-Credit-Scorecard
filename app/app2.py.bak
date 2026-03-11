@@ -1,0 +1,206 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import shap
+import matplotlib.pyplot as plt
+
+# ===============================
+# PAGE CONFIG
+# ===============================
+st.set_page_config(
+    page_title="AI Credit Risk Dashboard",
+    layout="wide"
+)
+
+st.title("🏦 Intelligent Customer Credit Risk System")
+
+# ===============================
+# LOAD MODEL
+# ===============================
+model = joblib.load("models/xgboost_model.pkl")
+
+# ===============================
+# SIDEBAR - BUSINESS CONTROLS
+# ===============================
+st.sidebar.header("⚙ Business Policy Controls")
+
+threshold = st.sidebar.slider(
+    "Approval Threshold",
+    0.1, 0.9, 0.45, 0.05
+)
+
+st.sidebar.write(
+    "Approve loan if default probability < threshold"
+)
+
+# ===============================
+# CUSTOMER INPUT PANEL
+# ===============================
+st.header("Customer Application")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    income = st.number_input(
+        "Annual Income",
+        0, 10000000, 500000
+    )
+
+with col2:
+    credit = st.number_input(
+        "Credit Amount",
+        0, 10000000, 200000
+    )
+
+with col3:
+    goods_price = st.number_input(
+        "Goods Price",
+        0, 10000000, 180000
+    )
+
+predict = st.button("Run Credit Risk Assessment")
+
+# ===============================
+# PREDICTION
+# ===============================
+if predict:
+
+    # Load template used in training
+    template = pd.read_csv(
+        "data/processed/X_test.csv"
+    ).iloc[:1].copy()
+
+    template[:] = 0
+
+    template["AMT_INCOME_TOTAL"] = income
+    template["AMT_CREDIT"] = credit
+    template["AMT_GOODS_PRICE"] = goods_price
+
+    prob = model.predict_proba(template)[0][1]
+
+    # ===============================
+    # RISK SCORE PANEL
+    # ===============================
+    st.header("Credit Risk Score")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric(
+            label="Default Probability",
+            value=f"{prob:.2%}"
+        )
+
+        risk_score = int(prob * 100)
+
+        st.progress(risk_score)
+
+    with col2:
+
+        if prob < threshold:
+            st.success("Loan Approved")
+        else:
+            st.error("Loan Rejected")
+
+    # ===============================
+    # CUSTOMER RISK PROFILE
+    # ===============================
+    st.header("Customer Risk Profile")
+
+    profile = pd.DataFrame({
+        "Feature": [
+            "Annual Income",
+            "Credit Amount",
+            "Goods Price",
+            "Risk Score"
+        ],
+        "Value": [
+            income,
+            credit,
+            goods_price,
+            f"{risk_score}%"
+        ]
+    })
+
+    st.table(profile)
+
+    # ===============================
+    # SHAP EXPLAINABILITY
+    # ===============================
+    st.header("Top Risk Factors (Explainable AI)")
+
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer(template)
+
+    fig, ax = plt.subplots()
+
+    shap.plots.waterfall(
+        shap_values[0],
+        show=False
+    )
+
+    st.pyplot(fig)
+
+# ===============================
+# PORTFOLIO SIMULATION
+# ===============================
+st.header("Portfolio Risk Simulation")
+
+try:
+
+    X_test = pd.read_csv("data/processed/X_test.csv")
+    y_test = pd.read_csv("data/processed/y_test.csv").values.ravel()
+
+    probs = model.predict_proba(X_test)[:, 1]
+
+    thresholds = np.arange(0.1, 0.9, 0.05)
+
+    results = []
+
+    for t in thresholds:
+
+        approved = probs < t
+
+        approval_rate = approved.mean()
+
+        default_rate = y_test[approved].mean()
+
+        results.append(
+            (t, approval_rate, default_rate)
+        )
+
+    results_df = pd.DataFrame(
+        results,
+        columns=[
+            "threshold",
+            "approval_rate",
+            "default_rate"
+        ]
+    )
+
+    fig, ax = plt.subplots()
+
+    ax.plot(
+        results_df["threshold"],
+        results_df["approval_rate"],
+        label="Approval Rate"
+    )
+
+    ax.plot(
+        results_df["threshold"],
+        results_df["default_rate"],
+        label="Default Rate"
+    )
+
+    ax.set_xlabel("Risk Threshold")
+    ax.set_ylabel("Rate")
+
+    ax.set_title("Approval vs Default Tradeoff")
+
+    ax.legend()
+
+    st.pyplot(fig)
+
+except:
+    st.warning("Portfolio simulation requires test dataset.")
