@@ -4,8 +4,6 @@ data/raw/*.csv
 # Ignore all CSV files
 *.csv
 
-# Ignore model files
-*.pkl
 
 # Ignore cache
 __pycache__/
