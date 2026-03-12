@@ -1,4 +1,3 @@
-// hola amigo kaise ho theek kho
 
 import streamlit as st
 import pandas as pd
@@ -14,20 +13,60 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 
-# ==============================
+# ------------------------------------------------
 # PAGE CONFIG
-# ==============================
-st.set_page_config(layout="wide")
-st.title("🏦 AI Credit Risk Decision Dashboard")
+# ------------------------------------------------
 
-# ==============================
+st.set_page_config(layout="wide")
+st.title("🏦 AI Credit Risk Decision Platform")
+
+# ------------------------------------------------
 # LOAD MODEL
-# ==============================
+# ------------------------------------------------
+
 model = joblib.load("models/xgboost_model.pkl")
 
-# ==============================
-# SIDEBAR CONTROLS
-# ==============================
+# ------------------------------------------------
+# BUSINESS FRIENDLY FEATURE NAMES
+# ------------------------------------------------
+
+feature_names_map = {
+    "AMT_CREDIT": "Loan Amount Requested",
+    "AMT_GOODS_PRICE": "Purchase Price",
+    "EXT_SOURCE_1": "External Credit Score A",
+    "EXT_SOURCE_2": "External Credit Score B",
+    "EXT_SOURCE_3": "External Credit Score C",
+    "DAYS_BIRTH": "Customer Age",
+    "AMT_ANNUITY": "Monthly Loan Payment",
+    "CODE_GENDER_M": "Applicant Gender",
+    "FLAG_DOCUMENT_3": "Identity Verification",
+}
+
+# ------------------------------------------------
+# FORMAT FEATURE VALUES
+# ------------------------------------------------
+
+def format_feature_value(feature,value):
+
+    if feature in ["Loan Amount Requested","Purchase Price","Monthly Loan Payment"]:
+        return f"₹{int(value):,}"
+
+    if feature=="Customer Age":
+        age=int(abs(value)/365)
+        return f"{age} years"
+
+    if "Credit Score" in feature:
+        return f"{value:.2f}"
+
+    if feature=="Identity Verification":
+        return "Verified" if value>0.5 else "Not Verified"
+
+    return f"{value:.2f}"
+
+# ------------------------------------------------
+# SIDEBAR
+# ------------------------------------------------
+
 st.sidebar.header("Business Policy Controls")
 
 threshold = st.sidebar.slider(
@@ -40,98 +79,100 @@ threshold = st.sidebar.slider(
 
 st.sidebar.write("Approve loan if default probability < threshold")
 
-# ==============================
-# INPUT MODE
-# ==============================
-st.sidebar.header("Input Mode")
+# ------------------------------------------------
+# TABS
+# ------------------------------------------------
 
-input_mode = st.sidebar.radio(
-    "Select Input Type",
-    [
-        "Single Customer Prediction",
-        "Portfolio Analysis (CSV Upload)"
-    ]
-)
+tab1,tab2,tab3 = st.tabs([
+    "Customer Decision",
+    "Portfolio Analysis",
+    "Policy Simulator"
+])
 
-# ==============================
-# PDF REPORT FUNCTION
-# ==============================
-def generate_pdf_report(income, credit, goods_price, prob, decision):
+# ------------------------------------------------
+# PDF REPORT
+# ------------------------------------------------
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+def generate_pdf(income,credit,goods,prob,decision):
 
-    styles = getSampleStyleSheet()
-    content = []
+    buffer=io.BytesIO()
 
-    title = Paragraph("AI Credit Risk Assessment Report", styles["Title"])
-    content.append(title)
-    content.append(Spacer(1,20))
+    doc=SimpleDocTemplate(buffer,pagesize=letter)
 
-    data = [
+    styles=getSampleStyleSheet()
+
+    elements=[]
+
+    elements.append(Paragraph("Credit Risk Assessment Report",styles["Title"]))
+    elements.append(Spacer(1,20))
+
+    table_data=[
         ["Feature","Value"],
         ["Annual Income",income],
         ["Credit Amount",credit],
-        ["Goods Price",goods_price],
+        ["Goods Price",goods],
         ["Default Probability",f"{prob:.2%}"],
         ["Decision",decision]
     ]
 
-    table = Table(data)
+    table=Table(table_data)
 
     table.setStyle([
         ("BACKGROUND",(0,0),(-1,0),colors.grey),
         ("GRID",(0,0),(-1,-1),1,colors.black)
     ])
 
-    content.append(table)
-    doc.build(content)
+    elements.append(table)
+
+    doc.build(elements)
 
     buffer.seek(0)
 
     return buffer
 
+# ------------------------------------------------
+# TAB 1 : SINGLE CUSTOMER
+# ------------------------------------------------
 
-# ============================================================
-# SINGLE CUSTOMER MODE
-# ============================================================
-if input_mode == "Single Customer Prediction":
+with tab1:
 
     st.header("Customer Loan Application")
 
-    col1, col2, col3 = st.columns(3)
+    c1,c2,c3=st.columns(3)
 
-    with col1:
-        income = st.number_input("Annual Income",0,10000000,500000)
+    with c1:
+        income=st.number_input("Annual Income",0,10000000,500000)
+        age=st.number_input("Age",18,80,30)
 
-    with col2:
-        credit = st.number_input("Credit Amount",0,10000000,200000)
+    with c2:
+        credit=st.number_input("Credit Amount",0,10000000,200000)
+        employment=st.number_input("Employment Years",0,40,5)
 
-    with col3:
-        goods_price = st.number_input("Goods Price",0,10000000,180000)
+    with c3:
+        goods_price=st.number_input("Goods Price",0,10000000,180000)
+        children=st.number_input("Number of Children",0,10,0)
 
-    predict = st.button("Run Credit Risk Assessment")
+    run_model=st.button("Run Credit Risk Assessment")
 
-    if predict:
+    if run_model:
 
-        template = pd.read_csv("data/processed/X_test.csv").iloc[:1].copy()
+        template=pd.read_csv("data/processed/X_test.csv").mean().to_frame().T
 
-        template[:] = 0
+        template["AMT_INCOME_TOTAL"]=income
+        template["AMT_CREDIT"]=credit
+        template["AMT_GOODS_PRICE"]=goods_price
 
-        template["AMT_INCOME_TOTAL"] = income
-        template["AMT_CREDIT"] = credit
-        template["AMT_GOODS_PRICE"] = goods_price
+        prob=model.predict_proba(template)[0][1]
 
-        prob = model.predict_proba(template)[0][1]
+        risk_score=int((1-prob)*100)
 
-        st.header("Customer Risk Score")
+        st.subheader("Customer Risk Score")
 
-        col1, col2 = st.columns(2)
+        col1,col2=st.columns(2)
 
-        # Risk Gauge
         with col1:
 
-            fig = go.Figure(go.Indicator(
+            fig=go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=prob*100,
                 title={"text":"Default Risk (%)"},
@@ -148,147 +189,193 @@ if input_mode == "Single Customer Prediction":
 
             st.plotly_chart(fig)
 
-        # Decision
         with col2:
 
             st.metric("Default Probability",f"{prob:.2%}")
+            st.metric("Credit Risk Score",f"{risk_score}/100")
 
-            if prob < threshold:
-                st.success("Loan Approved")
-                decision = "Loan Approved"
+            if prob<threshold:
+                decision="Loan Approved"
+                st.success(decision)
             else:
-                st.error("Loan Rejected")
-                decision = "Loan Rejected"
+                decision="Loan Rejected"
+                st.error(decision)
 
-        # SHAP Explanation
-        st.header("Prediction Explanation")
+        # SHAP EXPLANATION
 
-        explainer = shap.TreeExplainer(model)
+        st.subheader("Prediction Explanation")
 
-        shap_values = explainer(template)
+        explainer=shap.TreeExplainer(model)
 
-        fig, ax = plt.subplots()
+        shap_values=explainer(template)
+
+        feature_names=[
+            feature_names_map.get(col,col)
+            for col in template.columns
+        ]
+
+        labels=[
+            f"{format_feature_value(feature_names[i],template.iloc[0][i])} — {feature_names[i]}"
+            for i in range(len(feature_names))
+        ]
+
+        fig,ax=plt.subplots()
 
         shap.plots.waterfall(
-            shap_values[0],
+            shap.Explanation(
+                values=shap_values.values[0],
+                base_values=shap_values.base_values[0],
+                data=template.iloc[0],
+                feature_names=labels
+            ),
             show=False
         )
 
         st.pyplot(fig)
 
-        # PDF Report
-        pdf = generate_pdf_report(
-            income,
-            credit,
-            goods_price,
-            prob,
-            decision
+        # TOP DRIVERS
+
+        st.subheader("Key Risk Drivers")
+
+        contributions=pd.Series(
+            shap_values.values[0],
+            index=feature_names
         )
+
+        top=contributions.abs().sort_values(ascending=False).head(3)
+
+        for f in top.index:
+
+            impact=contributions[f]
+
+            if impact>0:
+                st.write(f"🔴 {f} increases risk")
+            else:
+                st.write(f"🟢 {f} lowers risk")
+
+        pdf=generate_pdf(income,credit,goods_price,prob,decision)
 
         st.download_button(
-            label="Download Credit Risk Report (PDF)",
-            data=pdf,
-            file_name="credit_risk_report.pdf",
-            mime="application/pdf"
+            "Download Credit Report",
+            pdf,
+            file_name="credit_report.pdf"
         )
 
+# ------------------------------------------------
+# TAB 2 : PORTFOLIO ANALYZER
+# ------------------------------------------------
 
-# ============================================================
-# PORTFOLIO ANALYSIS MODE
-# ============================================================
-if input_mode == "Portfolio Analysis (CSV Upload)":
+with tab2:
 
     st.header("Customer Portfolio Risk Analyzer")
 
-    uploaded_file = st.file_uploader(
-        "Upload Customer Dataset (CSV)",
-        type=["csv"]
-    )
+    file=st.file_uploader("Upload CSV",type=["csv"])
 
-    if uploaded_file is not None:
+    if file:
 
-        df_portfolio = pd.read_csv(uploaded_file)
+        df=pd.read_csv(file)
 
-        st.subheader("Uploaded Data Preview")
-        st.dataframe(df_portfolio.head())
+        st.subheader("Uploaded Data")
 
-        template = pd.read_csv("data/processed/X_test.csv")
+        st.dataframe(df.head())
 
-        portfolio_template = pd.DataFrame(
+        template_cols=pd.read_csv("data/processed/X_test.csv").columns
+
+        portfolio=pd.DataFrame(
             0,
-            index=df_portfolio.index,
-            columns=template.columns
+            index=df.index,
+            columns=template_cols
         )
 
-        if "AMT_INCOME_TOTAL" in df_portfolio.columns:
-            portfolio_template["AMT_INCOME_TOTAL"] = df_portfolio["AMT_INCOME_TOTAL"]
+        if "AMT_INCOME_TOTAL" in df.columns:
+            portfolio["AMT_INCOME_TOTAL"]=df["AMT_INCOME_TOTAL"]
 
-        if "AMT_CREDIT" in df_portfolio.columns:
-            portfolio_template["AMT_CREDIT"] = df_portfolio["AMT_CREDIT"]
+        if "AMT_CREDIT" in df.columns:
+            portfolio["AMT_CREDIT"]=df["AMT_CREDIT"]
 
-        if "AMT_GOODS_PRICE" in df_portfolio.columns:
-            portfolio_template["AMT_GOODS_PRICE"] = df_portfolio["AMT_GOODS_PRICE"]
+        if "AMT_GOODS_PRICE" in df.columns:
+            portfolio["AMT_GOODS_PRICE"]=df["AMT_GOODS_PRICE"]
 
-        probs = model.predict_proba(portfolio_template)[:,1]
+        probs=model.predict_proba(portfolio)[:,1]
 
-        df_portfolio["default_probability"] = probs
+        df["default_probability"]=probs
 
-        df_portfolio["decision"] = np.where(
-            probs < threshold,
+        df["decision"]=np.where(
+            probs<threshold,
             "Approve",
             "Reject"
         )
 
-        # =============================
-        # SHAP EXPLANATION FOR CSV
-        # =============================
-        explainer = shap.TreeExplainer(model)
+        st.subheader("Prediction Results")
 
-        shap_values = explainer(portfolio_template)
+        st.dataframe(df)
 
-        top_features = []
+        total=len(df)
+        approved=(df["decision"]=="Approve").sum()
+        rejected=(df["decision"]=="Reject").sum()
 
-        for i in range(len(df_portfolio)):
+        c1,c2,c3=st.columns(3)
 
-            values = shap_values.values[i]
+        c1.metric("Total Customers",total)
+        c2.metric("Approved Loans",approved)
+        c3.metric("Rejected Loans",rejected)
 
-            feature_importance = pd.Series(
-                values,
-                index=portfolio_template.columns
-            ).abs().sort_values(ascending=False)
+        # HISTOGRAM
 
-            top3 = feature_importance.head(3).index.tolist()
+        fig,ax=plt.subplots()
 
-            top_features.append(", ".join(top3))
-
-        df_portfolio["top_risk_factors"] = top_features
-
-        st.subheader("Portfolio Prediction Results")
-
-        st.dataframe(df_portfolio)
-
-        # Portfolio Stats
-        total_customers = len(df_portfolio)
-        approved = (df_portfolio["decision"] == "Approve").sum()
-        rejected = (df_portfolio["decision"] == "Reject").sum()
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("Total Customers", total_customers)
-        col2.metric("Approved Loans", approved)
-        col3.metric("Rejected Loans", rejected)
-
-        # Risk Distribution
-        fig, ax = plt.subplots()
-
-        ax.hist(
-            df_portfolio["default_probability"],
-            bins=20
-        )
+        ax.hist(df["default_probability"],bins=20)
 
         ax.set_xlabel("Default Probability")
         ax.set_ylabel("Customers")
-        ax.set_title("Portfolio Risk Distribution")
 
         st.pyplot(fig)
 
+        # SHAP ANALYSIS FOR PORTFOLIO
+
+        st.subheader("Top Portfolio Risk Drivers")
+
+        explainer=shap.TreeExplainer(model)
+
+        shap_values=explainer(portfolio)
+
+        shap_importance=np.abs(shap_values.values).mean(axis=0)
+
+        importance=pd.Series(
+            shap_importance,
+            index=portfolio.columns
+        ).sort_values(ascending=False).head(10)
+
+        importance.index=[
+            feature_names_map.get(i,i)
+            for i in importance.index
+        ]
+
+        st.bar_chart(importance)
+
+# ------------------------------------------------
+# TAB 3 : POLICY SIMULATOR
+# ------------------------------------------------
+
+with tab3:
+
+    st.header("Credit Policy Simulator")
+
+    X_test=pd.read_csv("data/processed/X_test.csv")
+
+    probs=model.predict_proba(X_test)[:,1]
+
+    thresholds=np.arange(0.1,0.9,0.05)
+
+    approval_rates=[]
+
+    for t in thresholds:
+
+        approval_rates.append((probs<t).mean())
+
+    sim_df=pd.DataFrame({
+        "threshold":thresholds,
+        "approval_rate":approval_rates
+    })
+
+    st.line_chart(sim_df.set_index("threshold"))
