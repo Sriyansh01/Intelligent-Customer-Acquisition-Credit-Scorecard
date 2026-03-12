@@ -1,3 +1,4 @@
+// hola amigo kaise ho theek kho
 
 import streamlit as st
 import pandas as pd
@@ -13,20 +14,20 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 
-# =============================
+# ==============================
 # PAGE CONFIG
-# =============================
+# ==============================
 st.set_page_config(layout="wide")
 st.title("🏦 AI Credit Risk Decision Dashboard")
 
-# =============================
+# ==============================
 # LOAD MODEL
-# =============================
+# ==============================
 model = joblib.load("models/xgboost_model.pkl")
 
-# =============================
+# ==============================
 # SIDEBAR CONTROLS
-# =============================
+# ==============================
 st.sidebar.header("Business Policy Controls")
 
 threshold = st.sidebar.slider(
@@ -39,9 +40,9 @@ threshold = st.sidebar.slider(
 
 st.sidebar.write("Approve loan if default probability < threshold")
 
-# =============================
+# ==============================
 # INPUT MODE
-# =============================
+# ==============================
 st.sidebar.header("Input Mode")
 
 input_mode = st.sidebar.radio(
@@ -52,13 +53,12 @@ input_mode = st.sidebar.radio(
     ]
 )
 
-# =============================
+# ==============================
 # PDF REPORT FUNCTION
-# =============================
+# ==============================
 def generate_pdf_report(income, credit, goods_price, prob, decision):
 
     buffer = io.BytesIO()
-
     doc = SimpleDocTemplate(buffer, pagesize=letter)
 
     styles = getSampleStyleSheet()
@@ -92,9 +92,9 @@ def generate_pdf_report(income, credit, goods_price, prob, decision):
     return buffer
 
 
-# ====================================================
+# ============================================================
 # SINGLE CUSTOMER MODE
-# ====================================================
+# ============================================================
 if input_mode == "Single Customer Prediction":
 
     st.header("Customer Loan Application")
@@ -115,6 +115,7 @@ if input_mode == "Single Customer Prediction":
     if predict:
 
         template = pd.read_csv("data/processed/X_test.csv").iloc[:1].copy()
+
         template[:] = 0
 
         template["AMT_INCOME_TOTAL"] = income
@@ -123,15 +124,11 @@ if input_mode == "Single Customer Prediction":
 
         prob = model.predict_proba(template)[0][1]
 
-        risk_score = int((1-prob)*100)
-
         st.header("Customer Risk Score")
 
         col1, col2 = st.columns(2)
 
-        # =============================
-        # RISK GAUGE
-        # =============================
+        # Risk Gauge
         with col1:
 
             fig = go.Figure(go.Indicator(
@@ -151,13 +148,10 @@ if input_mode == "Single Customer Prediction":
 
             st.plotly_chart(fig)
 
-        # =============================
-        # RISK SCORE PANEL
-        # =============================
+        # Decision
         with col2:
 
             st.metric("Default Probability",f"{prob:.2%}")
-            st.metric("Credit Risk Score",f"{risk_score}/100")
 
             if prob < threshold:
                 st.success("Loan Approved")
@@ -166,40 +160,7 @@ if input_mode == "Single Customer Prediction":
                 st.error("Loan Rejected")
                 decision = "Loan Rejected"
 
-                # =============================
-                # AI RECOMMENDATION ENGINE
-                # =============================
-                st.subheader("AI Recommendation")
-
-                recommendations = []
-
-                if credit > income*0.5:
-                    rec_credit = int(income*0.5)
-                    recommendations.append(
-                        f"Reduce credit amount to around ₹{rec_credit}"
-                    )
-
-                if goods_price > credit:
-                    recommendations.append(
-                        "Ensure goods price does not exceed loan amount"
-                    )
-
-                if income < 300000:
-                    recommendations.append(
-                        "Increase income declaration or provide guarantor"
-                    )
-
-                if len(recommendations) == 0:
-                    recommendations.append(
-                        "Improve financial stability or credit history"
-                    )
-
-                for r in recommendations:
-                    st.write("•",r)
-
-        # =============================
-        # SHAP EXPLANATION
-        # =============================
+        # SHAP Explanation
         st.header("Prediction Explanation")
 
         explainer = shap.TreeExplainer(model)
@@ -215,9 +176,7 @@ if input_mode == "Single Customer Prediction":
 
         st.pyplot(fig)
 
-        # =============================
-        # PDF REPORT
-        # =============================
+        # PDF Report
         pdf = generate_pdf_report(
             income,
             credit,
@@ -234,9 +193,9 @@ if input_mode == "Single Customer Prediction":
         )
 
 
-# ====================================================
+# ============================================================
 # PORTFOLIO ANALYSIS MODE
-# ====================================================
+# ============================================================
 if input_mode == "Portfolio Analysis (CSV Upload)":
 
     st.header("Customer Portfolio Risk Analyzer")
@@ -281,7 +240,7 @@ if input_mode == "Portfolio Analysis (CSV Upload)":
         )
 
         # =============================
-        # SHAP EXPLANATIONS
+        # SHAP EXPLANATION FOR CSV
         # =============================
         explainer = shap.TreeExplainer(model)
 
@@ -305,27 +264,27 @@ if input_mode == "Portfolio Analysis (CSV Upload)":
         df_portfolio["top_risk_factors"] = top_features
 
         st.subheader("Portfolio Prediction Results")
+
         st.dataframe(df_portfolio)
 
-        # =============================
-        # PORTFOLIO STATS
-        # =============================
-        total = len(df_portfolio)
-        approved = (df_portfolio["decision"]=="Approve").sum()
-        rejected = (df_portfolio["decision"]=="Reject").sum()
+        # Portfolio Stats
+        total_customers = len(df_portfolio)
+        approved = (df_portfolio["decision"] == "Approve").sum()
+        rejected = (df_portfolio["decision"] == "Reject").sum()
 
-        col1,col2,col3 = st.columns(3)
+        col1, col2, col3 = st.columns(3)
 
-        col1.metric("Total Customers",total)
-        col2.metric("Approved Loans",approved)
-        col3.metric("Rejected Loans",rejected)
+        col1.metric("Total Customers", total_customers)
+        col2.metric("Approved Loans", approved)
+        col3.metric("Rejected Loans", rejected)
 
-        # =============================
-        # RISK DISTRIBUTION
-        # =============================
-        fig,ax = plt.subplots()
+        # Risk Distribution
+        fig, ax = plt.subplots()
 
-        ax.hist(df_portfolio["default_probability"],bins=20)
+        ax.hist(
+            df_portfolio["default_probability"],
+            bins=20
+        )
 
         ax.set_xlabel("Default Probability")
         ax.set_ylabel("Customers")
