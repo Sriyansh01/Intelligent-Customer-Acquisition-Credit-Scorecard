@@ -3,22 +3,14 @@ import pandas as pd
 import numpy as np
 import joblib
 import shap
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
-import io
-
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
 
 # ------------------------------------------------
 # PAGE CONFIG
 # ------------------------------------------------
 
-st.set_page_config(page_title="AI Credit Risk Platform", layout="wide")
-
+st.set_page_config(layout="wide")
 st.title("🏦 Intelligent Customer Acquisition Credit Scorecard")
 
 # ------------------------------------------------
@@ -32,7 +24,7 @@ def load_model():
 model = load_model()
 
 # ------------------------------------------------
-# LOAD TEMPLATE DATA
+# LOAD TEMPLATE FEATURES
 # ------------------------------------------------
 
 @st.cache_data
@@ -42,47 +34,26 @@ def load_template():
 X_template = load_template()
 
 # ------------------------------------------------
-# EXECUTIVE DASHBOARD
+# HUMAN READABLE FEATURE NAME
 # ------------------------------------------------
 
-st.subheader("📊 Portfolio Overview")
+def humanize(name):
 
-col1,col2,col3,col4 = st.columns(4)
+    name = name.replace("AMT_", "Amount ")
+    name = name.replace("EXT_SOURCE_", "External Credit Score ")
+    name = name.replace("DAYS_BIRTH", "Customer Age")
+    name = name.replace("FLAG_", "")
+    name = name.replace("NAME_", "")
+    name = name.replace("CODE_", "")
+    name = name.replace("_", " ")
 
-col1.metric("Applications Processed","10,000")
-col2.metric("Approval Rate","63%")
-col3.metric("Predicted Defaults","12%")
-col4.metric("Model ROC-AUC","0.91")
-
-st.divider()
-
-# ------------------------------------------------
-# FEATURE NAME MAPPING
-# ------------------------------------------------
-
-feature_names_map = {
-
-    "AMT_CREDIT": "Loan Amount Requested",
-    "AMT_GOODS_PRICE": "Purchase Price",
-    "AMT_ANNUITY": "Monthly Installment",
-    "AMT_INCOME_TOTAL": "Customer Annual Income",
-
-    "DAYS_BIRTH": "Customer Age",
-    "EXT_SOURCE_1": "External Credit Score A",
-    "EXT_SOURCE_2": "External Credit Score B",
-    "EXT_SOURCE_3": "External Credit Score C",
-
-    "FLAG_DOCUMENT_3": "Identity Document Verified",
-    "FLAG_OWN_CAR_Y": "Owns a Car",
-    "CODE_GENDER_M": "Male Applicant",
-    "NAME_FAMILY_STATUS_Married": "Married Status",
-}
+    return name.title()
 
 # ------------------------------------------------
 # SIDEBAR POLICY
 # ------------------------------------------------
 
-st.sidebar.header("Credit Policy Controls")
+st.sidebar.header("Credit Policy")
 
 threshold = st.sidebar.slider(
     "Approval Threshold",
@@ -96,88 +67,80 @@ threshold = st.sidebar.slider(
 # TABS
 # ------------------------------------------------
 
-tab1,tab2,tab3 = st.tabs([
+tab1, tab2 = st.tabs([
     "Customer Decision",
-    "Portfolio Analysis",
-    "Policy Simulator"
+    "Portfolio Analysis"
 ])
 
-# ------------------------------------------------
-# PDF REPORT
-# ------------------------------------------------
-
-def generate_pdf(income,credit,goods,prob,decision):
-
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer,pagesize=letter)
-
-    styles = getSampleStyleSheet()
-
-    elements=[]
-
-    elements.append(Paragraph("Credit Risk Assessment Report",styles["Title"]))
-    elements.append(Spacer(1,20))
-
-    table_data=[
-        ["Feature","Value"],
-        ["Annual Income",income],
-        ["Credit Amount",credit],
-        ["Goods Price",goods],
-        ["Default Probability",f"{prob:.2%}"],
-        ["Decision",decision]
-    ]
-
-    table=Table(table_data)
-
-    table.setStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.grey),
-        ("GRID",(0,0),(-1,-1),1,colors.black)
-    ])
-
-    elements.append(table)
-
-    doc.build(elements)
-
-    buffer.seek(0)
-
-    return buffer
-
-# ------------------------------------------------
-# TAB 1 : CUSTOMER DECISION
-# ------------------------------------------------
+# =================================================
+# CUSTOMER DECISION
+# =================================================
 
 with tab1:
 
     st.header("Customer Loan Application")
 
-    c1,c2,c3 = st.columns(3)
+    col1, col2, col3 = st.columns(3)
 
-    with c1:
+    with col1:
         income = st.number_input("Annual Income",0,10000000,500000)
+        age = st.slider("Customer Age",18,70,35)
+        ext1 = st.slider("External Credit Score A",0.0,1.0,0.5)
 
-    with c2:
-        credit = st.number_input("Credit Amount",0,10000000,200000)
+    with col2:
+        credit = st.number_input("Loan Amount",0,10000000,200000)
+        ext2 = st.slider("External Credit Score B",0.0,1.0,0.5)
+        owns_car = st.selectbox("Owns Car",[0,1])
 
-    with c3:
+    with col3:
         goods_price = st.number_input("Goods Price",0,10000000,180000)
+        ext3 = st.slider("External Credit Score C",0.0,1.0,0.5)
+        married = st.selectbox("Married",[0,1])
 
     run_model = st.button("Run Credit Risk Assessment")
 
     if run_model:
 
-        template = X_template.mean().to_frame().T
+        # IMPORTANT: copy template row
+        template = X_template.iloc[[0]].copy()
 
-        template["AMT_INCOME_TOTAL"]=income
-        template["AMT_CREDIT"]=credit
-        template["AMT_GOODS_PRICE"]=goods_price
+        # modify features
+        template.loc[:, "AMT_INCOME_TOTAL"] = income
+        template.loc[:, "AMT_CREDIT"] = credit
+        template.loc[:, "AMT_GOODS_PRICE"] = goods_price
 
+        if "AMT_ANNUITY" in template.columns:
+            template.loc[:, "AMT_ANNUITY"] = credit / 12
+
+        if "EXT_SOURCE_1" in template.columns:
+            template.loc[:, "EXT_SOURCE_1"] = ext1
+
+        if "EXT_SOURCE_2" in template.columns:
+            template.loc[:, "EXT_SOURCE_2"] = ext2
+
+        if "EXT_SOURCE_3" in template.columns:
+            template.loc[:, "EXT_SOURCE_3"] = ext3
+
+        if "DAYS_BIRTH" in template.columns:
+            template.loc[:, "DAYS_BIRTH"] = -age*365
+
+        if "FLAG_OWN_CAR_Y" in template.columns:
+            template.loc[:, "FLAG_OWN_CAR_Y"] = owns_car
+
+        if "NAME_FAMILY_STATUS_Married" in template.columns:
+            template.loc[:, "NAME_FAMILY_STATUS_Married"] = married
+
+        # ensure column order
+        template = template[X_template.columns]
+
+        # prediction
         prob = model.predict_proba(template)[0][1]
 
         credit_score = int(300 + (1-prob)*600)
 
-        st.subheader("Customer Risk Evaluation")
+        st.subheader("Prediction Result")
 
-        col1,col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
         with col1:
 
@@ -203,52 +166,33 @@ with tab1:
             st.metric("AI Credit Score",credit_score)
 
             if prob < threshold:
-                decision="Loan Approved"
-                st.success(decision)
+                st.success("Loan Approved")
             else:
-                decision="Loan Rejected"
-                st.error(decision)
+                st.error("Loan Rejected")
 
-        # SHAP EXPLANATION
+        # SHAP explanation
 
-        st.subheader("Explainable AI — Why this decision?")
+        st.subheader("Top Risk Drivers")
 
         explainer = shap.TreeExplainer(model)
         shap_values = explainer(template)
 
-        fig,ax = plt.subplots()
-        shap.plots.waterfall(shap_values[0],show=False)
-
-        st.pyplot(fig)
-
-        # TOP RISK DRIVERS
-
-        st.subheader("Top Drivers of Risk")
-
         shap_importance = np.abs(shap_values.values[0])
+
         top_idx = np.argsort(shap_importance)[-3:][::-1]
 
         for i in top_idx:
 
-            name = template.columns[i]
-            name = feature_names_map.get(name,name)
+            feature = humanize(template.columns[i])
 
             if shap_values.values[0][i] > 0:
-                st.error(f"{name} increases default risk")
+                st.error(f"{feature} increases risk")
             else:
-                st.success(f"{name} reduces default risk")
+                st.success(f"{feature} reduces risk")
 
-        pdf = generate_pdf(income,credit,goods_price,prob,decision)
-
-        st.download_button(
-            "Download Credit Report",
-            pdf,
-            file_name="credit_report.pdf"
-        )
-
-# ------------------------------------------------
-# TAB 2 : PORTFOLIO ANALYSIS
-# ------------------------------------------------
+# =================================================
+# PORTFOLIO ANALYSIS
+# =================================================
 
 with tab2:
 
@@ -260,75 +204,61 @@ with tab2:
 
         df = pd.read_csv(file)
 
+        st.subheader("Uploaded Data")
+        st.dataframe(df)
+
+        # create portfolio dataset with correct features
+
         portfolio = pd.DataFrame(
-            0,
-            index=df.index,
+            np.tile(X_template.iloc[0].values,(len(df),1)),
             columns=X_template.columns
         )
 
         if "AMT_INCOME_TOTAL" in df.columns:
-            portfolio["AMT_INCOME_TOTAL"]=df["AMT_INCOME_TOTAL"]
+            portfolio["AMT_INCOME_TOTAL"] = df["AMT_INCOME_TOTAL"]
 
         if "AMT_CREDIT" in df.columns:
-            portfolio["AMT_CREDIT"]=df["AMT_CREDIT"]
+            portfolio["AMT_CREDIT"] = df["AMT_CREDIT"]
 
         if "AMT_GOODS_PRICE" in df.columns:
-            portfolio["AMT_GOODS_PRICE"]=df["AMT_GOODS_PRICE"]
+            portfolio["AMT_GOODS_PRICE"] = df["AMT_GOODS_PRICE"]
 
-        probs=model.predict_proba(portfolio)[:,1]
+        probs = model.predict_proba(portfolio)[:,1]
 
-        df["default_probability"]=probs
+        df["default_probability"] = probs
 
-        df["decision"]=np.where(
-            probs<threshold,
+        df["decision"] = np.where(
+            probs < threshold,
             "Approve",
             "Reject"
         )
 
-        # ------------------------------------------------
-        # REASON COLUMN USING SHAP
-        # ------------------------------------------------
+        # SHAP reasons
 
         explainer = shap.TreeExplainer(model)
         shap_values = explainer(portfolio)
 
-        reasons=[]
+        reasons = []
 
         for i in range(len(portfolio)):
 
             shap_row = shap_values.values[i]
 
-            top_feature_idx = np.argmax(np.abs(shap_row))
+            idx = np.argmax(np.abs(shap_row))
 
-            feature_name = portfolio.columns[top_feature_idx]
+            feature = humanize(portfolio.columns[idx])
 
-            feature_name = feature_names_map.get(feature_name,feature_name)
-
-            if shap_row[top_feature_idx] > 0:
-                reason = f"High {feature_name}"
+            if shap_row[idx] > 0:
+                reason = f"High {feature}"
             else:
-                reason = f"Strong {feature_name}"
+                reason = f"Strong {feature}"
 
             reasons.append(reason)
 
-        df["reason"]=reasons
-
-        # DISPLAY TABLE
+        df["reason"] = reasons
 
         st.subheader("Prediction Results")
-
-        display_df = df.copy()
-
-        display_df.columns = [
-            "Income",
-            "Loan Amount",
-            "Goods Price",
-            "Default Probability",
-            "Decision",
-            "Reason"
-        ]
-
-        st.dataframe(display_df)
+        st.dataframe(df)
 
         total=len(df)
         approved=(df["decision"]=="Approve").sum()
@@ -340,9 +270,7 @@ with tab2:
         col2.metric("Approved Loans",approved)
         col3.metric("Rejected Loans",rejected)
 
-        # ------------------------------------------------
-        # RISK DISTRIBUTION
-        # ------------------------------------------------
+        # risk distribution
 
         st.subheader("Portfolio Risk Distribution")
 
@@ -364,72 +292,6 @@ with tab2:
 
         st.info("""
 🟢 Low Risk (0–30%) → Safe borrowers  
-🟡 Medium Risk (30–60%) → Moderate default risk  
+🟡 Medium Risk (30–60%) → Moderate risk  
 🔴 High Risk (60–100%) → High probability of default
 """)
-
-        # ------------------------------------------------
-        # TOP REJECTION REASONS
-        # ------------------------------------------------
-
-        st.subheader("Top Reasons for Loan Rejection")
-
-        rejected_customers = portfolio[df["decision"]=="Reject"]
-
-        if len(rejected_customers)>0:
-
-            shap_values = explainer(rejected_customers)
-
-            shap_importance = np.abs(shap_values.values).mean(axis=0)
-
-            importance=pd.Series(
-                shap_importance,
-                index=rejected_customers.columns
-            ).sort_values(ascending=False).head(5)
-
-            importance.index=[
-                feature_names_map.get(i,i)
-                for i in importance.index
-            ]
-
-            fig,ax=plt.subplots()
-
-            importance.sort_values().plot(
-                kind="barh",
-                ax=ax
-            )
-
-            ax.set_xlabel("Impact on Default Risk")
-
-            st.pyplot(fig)
-
-# ------------------------------------------------
-# TAB 3 : POLICY SIMULATOR
-# ------------------------------------------------
-
-with tab3:
-
-    st.header("Credit Policy Simulator")
-
-    probs=model.predict_proba(X_template)[:,1]
-
-    thresholds=np.arange(0.1,0.9,0.05)
-
-    approval_rates=[]
-
-    for t in thresholds:
-        approval_rates.append((probs<t).mean())
-
-    sim_df=pd.DataFrame({
-        "threshold":thresholds,
-        "approval_rate":approval_rates
-    })
-
-    fig = px.line(
-        sim_df,
-        x="threshold",
-        y="approval_rate",
-        title="Approval Rate vs Policy Threshold"
-    )
-
-    st.plotly_chart(fig)
