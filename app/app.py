@@ -1,294 +1,158 @@
-// hola amigo kaise ho theek kho
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import shap
 import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-import io
+import seaborn as sns
+import shap
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
+# --- SETTINGS ---
+st.set_page_config(page_title="EquiScore:Bank Scorecard ", layout="wide")
 
-# ==============================
-# PAGE CONFIG
-# ==============================
-st.set_page_config(layout="wide")
-st.title("🏦 AI Credit Risk Decision Dashboard")
+# --- LOAD ASSETS ---
+@st.cache_resource
+def load_assets():
+    # Loading LightGBM (Proposed) and XGBoost (Baseline)
+    lgb = joblib.load("models/kaggle_model.pkl")
+    xgb = joblib.load("models/xgb_model.pkl")
+    # Loading the 150k record dataset
+    df = pd.read_csv("cs-training.csv").iloc[:, 1:].fillna(0)
+    return lgb, xgb, df
 
-# ==============================
-# LOAD MODEL
-# ==============================
-model = joblib.load("models/xgboost_model.pkl")
+try:
+    lgb_model, xgb_model, df_raw = load_assets()
+    st.sidebar.success("✅ Systems Online: 150k Records Indexed")
+except Exception as e:
+    st.error(f"❌ Initialization Error: {e}. Ensure models/ folder contains .pkl files.")
 
-# ==============================
-# SIDEBAR CONTROLS
-# ==============================
-st.sidebar.header("Business Policy Controls")
+# --- SIDEBAR: IDENTITY & INPUT ---
+st.sidebar.header("🔍 Identity & Profile")
+mode = st.sidebar.radio("Input Method", ["Customer ID Lookup", "Manual Entry / New Individual"])
 
-threshold = st.sidebar.slider(
-    "Approval Threshold",
-    0.1,
-    0.9,
-    0.45,
-    0.05
-)
+is_new_individual = False
 
-st.sidebar.write("Approve loan if default probability < threshold")
+if mode == "Customer ID Lookup":
+    cust_id = st.sidebar.number_input("Enter Customer ID (0-149999)", 0, 149999, 0)
+    person = df_raw.iloc[cust_id]
+    
+    # Mapping from Database
+    util = person['RevolvingUtilizationOfUnsecuredLines']
+    age = person['age']
+    p30 = int(person['NumberOfTime30-59DaysPastDueNotWorse'])
+    debt = person['DebtRatio']
+    income = person['MonthlyIncome']
+    lines = int(person['NumberOfOpenCreditLinesAndLoans'])
+    p90 = int(person['NumberOfTimes90DaysLate'])
+    estate = int(person['NumberRealEstateLoansOrLines'])
+    p60 = int(person['NumberOfTime60-89DaysPastDueNotWorse'])
+    deps = int(person['NumberOfDependents'])
+    
+    st.sidebar.info(f"👤 Displaying Record: #{cust_id}")
+    
+    # --- FIXED HISTORICAL STATUS BOX ---
+    if person['SeriousDlqin2yrs'] == 1:
+        st.sidebar.error("⚠️ **Historical Fact:** This user defaulted.")
+    else:
+        st.sidebar.success("✅ **Historical Fact:** This user paid on time.")
+else:
+    # --- MANUAL ENTRY & MICROCREDIT LOGIC ---
+    is_new_individual = st.sidebar.checkbox("Is New Individual? (No formal credit history)")
+    
+    age = st.sidebar.slider("Age", 21, 95, 35)
+    income = st.sidebar.number_input("Monthly Income ($)", 0, 999999, 5000)
+    util = st.sidebar.slider("Utilization Ratio", 0.0, 1.2, 0.3)
+    debt = st.sidebar.slider("Debt-to-Income Ratio", 0.0, 1.5, 0.3)
+    
+    if is_new_individual:
+        st.sidebar.subheader("🌟 Alternative Data (Inclusive Mode)")
+        residency = st.sidebar.slider("Years at Current Residence", 0, 10, 2)
+        utility_history = st.sidebar.checkbox("Consistent Utility/Rent Payments?")
+        
+        # PROXY MAPPING: Bridging the gap for the model
+        estate = 1 if residency > 4 else 0
+        lines = 2 if utility_history else 0
+        p30, p60, p90, deps = 0, 0, 0, 0
+    else:
+        p90 = st.sidebar.selectbox("Past Due (90+ Days)", [0, 1, 2, 3, 4, 5])
+        estate = st.sidebar.slider("Real Estate Loans", 0, 10, 1)
+        lines = st.sidebar.slider("Open Credit Lines", 0, 20, 5)
+        p30, p60, deps = 0, 0, 0
 
-# ==============================
-# INPUT MODE
-# ==============================
-st.sidebar.header("Input Mode")
+# --- PREDICTION ENGINE ---
+features = np.array([[util, age, p30, debt, income, lines, p90, estate, p60, deps]])
+feature_names = ['Utilization', 'Age', '30-59 Days Late', 'Debt Ratio', 'Monthly Income', 
+                 'Open Lines', '90+ Days Late', 'Real Estate Loans', '60-89 Days Late', 'Dependents']
 
-input_mode = st.sidebar.radio(
-    "Select Input Type",
-    [
-        "Single Customer Prediction",
-        "Portfolio Analysis (CSV Upload)"
-    ]
-)
+st.title("🛡️ EquiScore: Inclusive Bank Acquisition Framework")
+st.write(f"Track 3: Fintech - MicroCreditScore (Scalable & Explainable AI)")
 
-# ==============================
-# PDF REPORT FUNCTION
-# ==============================
-def generate_pdf_report(income, credit, goods_price, prob, decision):
+# --- DASHBOARD: COMPARATIVE SCORING ---
+col1, col2 = st.columns(2)
 
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+with col1:
+    st.subheader("🚀 PROPOSED (LightGBM + ADASYN)")
+    p_lgb = lgb_model.predict_proba(features)[0][1]
+    score_lgb = int((1 - p_lgb) * 850)
+    st.metric("Inclusion Score", f"{score_lgb}/850", delta=f"{score_lgb - 650} (vs Threshold)")
+    if score_lgb > 650: st.success("✅ STRATEGIC APPROVAL")
+    else: st.error("❌ STRATEGIC REJECTION")
 
-    styles = getSampleStyleSheet()
-    content = []
+with col2:
+    st.subheader("📄 BASELINE (XGBoost)")
+    p_xgb = xgb_model.predict_proba(features)[0][1]
+    score_xgb = int((1 - p_xgb) * 850)
+    st.metric("Standard Score", f"{score_xgb}/850")
+    if score_xgb > 650: st.success("✅ BASELINE APPROVAL")
+    else: st.error("❌ BASELINE REJECTION")
 
-    title = Paragraph("AI Credit Risk Assessment Report", styles["Title"])
-    content.append(title)
-    content.append(Spacer(1,20))
+# --- EXPLAINABLE AI (SHAP) ---
+st.divider()
+st.subheader("🔬 XAI: Why was this decision made?")
 
-    data = [
-        ["Feature","Value"],
-        ["Annual Income",income],
-        ["Credit Amount",credit],
-        ["Goods Price",goods_price],
-        ["Default Probability",f"{prob:.2%}"],
-        ["Decision",decision]
-    ]
+if is_new_individual:
+    st.info("**💡 Inclusion Protocol Active:** Real Estate and Open Lines impacts are derived from Alternative Data (Residency & Utility History).")
 
-    table = Table(data)
+if st.button("🔍 Generate Local Explanation (SHAP)"):
+    with st.spinner("Analyzing Feature Impact..."):
+        explainer = shap.TreeExplainer(lgb_model)
+        shap_values = explainer.shap_values(features)
+        impacts = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+        imp_df = pd.DataFrame({'Feature': feature_names, 'Impact': impacts}).sort_values(by='Impact')
 
-    table.setStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.grey),
-        ("GRID",(0,0),(-1,-1),1,colors.black)
-    ])
-
-    content.append(table)
-    doc.build(content)
-
-    buffer.seek(0)
-
-    return buffer
-
-
-# ============================================================
-# SINGLE CUSTOMER MODE
-# ============================================================
-if input_mode == "Single Customer Prediction":
-
-    st.header("Customer Loan Application")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        income = st.number_input("Annual Income",0,10000000,500000)
-
-    with col2:
-        credit = st.number_input("Credit Amount",0,10000000,200000)
-
-    with col3:
-        goods_price = st.number_input("Goods Price",0,10000000,180000)
-
-    predict = st.button("Run Credit Risk Assessment")
-
-    if predict:
-
-        template = pd.read_csv("data/processed/X_test.csv").iloc[:1].copy()
-
-        template[:] = 0
-
-        template["AMT_INCOME_TOTAL"] = income
-        template["AMT_CREDIT"] = credit
-        template["AMT_GOODS_PRICE"] = goods_price
-
-        prob = model.predict_proba(template)[0][1]
-
-        st.header("Customer Risk Score")
-
-        col1, col2 = st.columns(2)
-
-        # Risk Gauge
-        with col1:
-
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=prob*100,
-                title={"text":"Default Risk (%)"},
-                gauge={
-                    "axis":{"range":[0,100]},
-                    "bar":{"color":"red"},
-                    "steps":[
-                        {"range":[0,40],"color":"green"},
-                        {"range":[40,70],"color":"yellow"},
-                        {"range":[70,100],"color":"red"}
-                    ]
-                }
-            ))
-
-            st.plotly_chart(fig)
-
-        # Decision
-        with col2:
-
-            st.metric("Default Probability",f"{prob:.2%}")
-
-            if prob < threshold:
-                st.success("Loan Approved")
-                decision = "Loan Approved"
-            else:
-                st.error("Loan Rejected")
-                decision = "Loan Rejected"
-
-        # SHAP Explanation
-        st.header("Prediction Explanation")
-
-        explainer = shap.TreeExplainer(model)
-
-        shap_values = explainer(template)
-
-        fig, ax = plt.subplots()
-
-        shap.plots.waterfall(
-            shap_values[0],
-            show=False
-        )
-
+        fig, ax = plt.subplots(figsize=(10, 5))
+        # Logic: Red (Positive Impact) increases risk probability, Green (Negative Impact) decreases it
+        colors = ['#ff4b4b' if x > 0 else '#2eb82e' for x in imp_df['Impact']]
+        sns.barplot(x='Impact', y='Feature', data=imp_df, palette=colors, ax=ax)
+        ax.set_title("How Behavioral Factors Impacted the Risk Score")
         st.pyplot(fig)
 
-        # PDF Report
-        pdf = generate_pdf_report(
-            income,
-            credit,
-            goods_price,
-            prob,
-            decision
-        )
+# --- STATISTICAL SENSITIVITY ANALYSIS (The Blue Graph) ---
+st.divider()
+st.subheader("📈 Statistical Sensitivity Analysis")
+st.write(f"How **'Utilization'** affects risk for this specific profile:")
 
-        st.download_button(
-            label="Download Credit Risk Report (PDF)",
-            data=pdf,
-            file_name="credit_risk_report.pdf",
-            mime="application/pdf"
-        )
+u_range = np.linspace(0, 1.0, 20)
+y_risks = []
+for u in u_range:
+    test_features = np.array([[u, age, p30, debt, income, lines, p90, estate, p60, deps]])
+    risk_prob = lgb_model.predict_proba(test_features)[0][1]
+    y_risks.append(risk_prob)
 
+fig_trend, ax_trend = plt.subplots(figsize=(10, 4))
+ax_trend.plot(u_range, y_risks, color='#0000FF', marker='o', linewidth=2)
+ax_trend.set_xlabel("Utilization Rate (0.0 to 1.0)")
+ax_trend.set_ylabel("Probability of Default")
+ax_trend.grid(True, linestyle='--', alpha=0.6)
+st.pyplot(fig_trend)
 
-# ============================================================
-# PORTFOLIO ANALYSIS MODE
-# ============================================================
-if input_mode == "Portfolio Analysis (CSV Upload)":
+st.caption("🔍 **Insight:** This graph proves our model is non-linear. It shows the 'marginal risk' of every additional dollar spent on credit.")
 
-    st.header("Customer Portfolio Risk Analyzer")
-
-    uploaded_file = st.file_uploader(
-        "Upload Customer Dataset (CSV)",
-        type=["csv"]
-    )
-
-    if uploaded_file is not None:
-
-        df_portfolio = pd.read_csv(uploaded_file)
-
-        st.subheader("Uploaded Data Preview")
-        st.dataframe(df_portfolio.head())
-
-        template = pd.read_csv("data/processed/X_test.csv")
-
-        portfolio_template = pd.DataFrame(
-            0,
-            index=df_portfolio.index,
-            columns=template.columns
-        )
-
-        if "AMT_INCOME_TOTAL" in df_portfolio.columns:
-            portfolio_template["AMT_INCOME_TOTAL"] = df_portfolio["AMT_INCOME_TOTAL"]
-
-        if "AMT_CREDIT" in df_portfolio.columns:
-            portfolio_template["AMT_CREDIT"] = df_portfolio["AMT_CREDIT"]
-
-        if "AMT_GOODS_PRICE" in df_portfolio.columns:
-            portfolio_template["AMT_GOODS_PRICE"] = df_portfolio["AMT_GOODS_PRICE"]
-
-        probs = model.predict_proba(portfolio_template)[:,1]
-
-        df_portfolio["default_probability"] = probs
-
-        df_portfolio["decision"] = np.where(
-            probs < threshold,
-            "Approve",
-            "Reject"
-        )
-
-        # =============================
-        # SHAP EXPLANATION FOR CSV
-        # =============================
-        explainer = shap.TreeExplainer(model)
-
-        shap_values = explainer(portfolio_template)
-
-        top_features = []
-
-        for i in range(len(df_portfolio)):
-
-            values = shap_values.values[i]
-
-            feature_importance = pd.Series(
-                values,
-                index=portfolio_template.columns
-            ).abs().sort_values(ascending=False)
-
-            top3 = feature_importance.head(3).index.tolist()
-
-            top_features.append(", ".join(top3))
-
-        df_portfolio["top_risk_factors"] = top_features
-
-        st.subheader("Portfolio Prediction Results")
-
-        st.dataframe(df_portfolio)
-
-        # Portfolio Stats
-        total_customers = len(df_portfolio)
-        approved = (df_portfolio["decision"] == "Approve").sum()
-        rejected = (df_portfolio["decision"] == "Reject").sum()
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("Total Customers", total_customers)
-        col2.metric("Approved Loans", approved)
-        col3.metric("Rejected Loans", rejected)
-
-        # Risk Distribution
-        fig, ax = plt.subplots()
-
-        ax.hist(
-            df_portfolio["default_probability"],
-            bins=20
-        )
-
-        ax.set_xlabel("Default Probability")
-        ax.set_ylabel("Customers")
-        ax.set_title("Portfolio Risk Distribution")
-
-        st.pyplot(fig)
-
+# --- TRACK 3 BENCHMARK ---
+st.divider()
+if st.checkbox("📊 Show Fintech Competition Benchmark"):
+    benchmark_data = {
+        "Metric": ["Algorithm", "Fairness Handle", "Inclusion Logic", "Explainability"],
+        "Traditional Systems": ["XGBoost", "None (Bias)", "Exclude Thin-Files", "Black Box"],
+        "EquiScore (Ours)": ["LightGBM (Leaf-wise)", "ADASYN Balancing", "Proxy Protocol", "SHAP (Transparent)"]
+    }
+    st.table(pd.DataFrame(benchmark_data))
