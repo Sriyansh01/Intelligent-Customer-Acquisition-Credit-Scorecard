@@ -113,7 +113,7 @@ with tab2:
     st.plotly_chart(fig_hist)
 
 with tab3:
-    st.subheader("Benchmarking vs Zong et al. (2025)")
+    st.subheader("Benchmarking vs XGBoost & SMOTEENN")
     comparison_df = pd.DataFrame({
         "Metric": ["Algorithm", "Oversampling", "AUC-ROC (Avg)", "Explainability"],
         "Zong et al. (2025)": ["XGBoost", "SMOTEENN", "0.882", "Low"],
